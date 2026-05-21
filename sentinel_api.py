@@ -232,11 +232,23 @@ def _context_fallback(prompt: str, context: str) -> str:
     # 1. Priorité absolue : Rechercher dans le contexte SharePoint (RAG)
     if context:
         ctx_lines = [l.strip() for l in context.split("\n") if l.strip()]
-        # Extraction des mots-clés du prompt
-        keywords = [w for w in p.replace("?", "").split() if len(w) > 3]
+        
+        # Extraction des mots-clés : mots > 3 lettres OU chiffres (ex: 30)
+        keywords = [w for w in p.replace("?", "").split() if len(w) > 3 or w.isdigit()]
         
         # Trouver les lignes pertinentes
-        relevant = [l for l in ctx_lines if any(k in l.lower() for k in keywords)]
+        relevant = []
+        for l in ctx_lines:
+            # Cas spécial : "ID 30" -> on cherche l'ID exact
+            digits = [w for w in p.split() if w.isdigit()]
+            if digits:
+                if any(f"ID {d}" in l for d in digits):
+                    relevant.append(l)
+                    continue
+            
+            # Recherche par mots-clés généraux
+            if any(k in l.lower() for k in keywords):
+                relevant.append(l)
         
         if relevant:
             return "D'après vos données SharePoint :\n" + "\n".join(relevant[:5])
