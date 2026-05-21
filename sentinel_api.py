@@ -228,26 +228,33 @@ def _build_system_prompt(context: str, role: str) -> str:
 def _context_fallback(prompt: str, context: str) -> str:
     """Réponse intelligente basée sur le contexte SharePoint si l'IA est indisponible."""
     p = prompt.lower()
-    lines = []
+    
+    # 1. Priorité absolue : Rechercher dans le contexte SharePoint (RAG)
     if context:
         ctx_lines = [l.strip() for l in context.split("\n") if l.strip()]
-        # Search relevant lines
-        keywords = [w for w in p.split() if len(w) > 3]
+        # Extraction des mots-clés du prompt
+        keywords = [w for w in p.replace("?", "").split() if len(w) > 3]
+        
+        # Trouver les lignes pertinentes
         relevant = [l for l in ctx_lines if any(k in l.lower() for k in keywords)]
+        
         if relevant:
-            lines.append("D'après vos données SharePoint :")
-            lines.extend(relevant[:5])
-            return "\n".join(lines)
-    # Generic fallback
+            return "D'après vos données SharePoint :\n" + "\n".join(relevant[:5])
+
+    # 2. Réponses génériques basées sur l'intention (si aucune donnée spécifique trouvée)
     if any(w in p for w in ["formation", "cours", "catalogue"]):
         return "Consultez le Catalogue de Formations dans votre portail SharePoint pour voir toutes les formations disponibles."
-    if any(w in p for w in ["demande", "inscription", "inscrire"]):
-        return "Pour soumettre une demande de formation, rendez-vous dans le portail Employé > Mes Demandes."
+    
+    if any(w in p for w in ["demande", "inscription", "inscrire", "statut"]):
+        return "Vous pouvez suivre l'état de vos inscriptions dans le portail Employé > Mes Demandes."
+    
     if any(w in p for w in ["budget", "coût", "prix"]):
         return "Les informations budgétaires sont accessibles aux Managers et RH dans le portail de gestion."
+        
     return (
-        "Je suis SkillBot, votre assistant de formation SkillFlow. "
-        "Posez-moi une question sur les formations, demandes ou votre parcours de compétences."
+        "Je suis SkillBot, votre assistant de formation. "
+        "Je n'ai pas trouvé de réponse précise dans vos données SharePoint, "
+        "mais je peux vous aider sur les formations, demandes ou votre profil."
     )
 
 
