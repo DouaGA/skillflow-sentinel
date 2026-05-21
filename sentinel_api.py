@@ -301,7 +301,7 @@ async def startup_checks() -> None:
         logger.warning(
             "SENTINEL_API_KEY non définie : l'API est ouverte (acceptable en dev local uniquement)."
         )
-    logger.info("SkillGuard Sentinel prêt — relais HF : %s%s", HF_SPACE_URL, HF_CHAT_PATH)
+    logger.info("SkillGuard Sentinel prêt — Mode: HF Inference API (Mistral/Zephyr)")
 
 
 @app.post("/api/secure-chat")
