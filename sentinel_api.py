@@ -236,11 +236,13 @@ def _context_fallback(prompt: str, context: str) -> str:
         # Extraction des mots-clés : mots > 3 lettres OU chiffres (ex: 30)
         keywords = [w for w in p.replace("?", "").split() if len(w) > 3 or w.isdigit()]
         
+        # Extraction des chiffres (IDs) robuste via regex
+        digits = re.findall(r'\b\d+\b', p)
+        
         # Trouver les lignes pertinentes
         relevant = []
         for l in ctx_lines:
             # Cas spécial : "ID 30" -> on cherche l'ID exact
-            digits = [w for w in p.split() if w.isdigit()]
             if digits:
                 if any(f"ID {d}" in l for d in digits):
                     relevant.append(l)
