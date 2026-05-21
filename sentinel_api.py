@@ -241,8 +241,13 @@ def _context_fallback(prompt: str, context: str) -> str:
         
         # Trouver les lignes pertinentes
         relevant = []
-        for l in ctx_lines:
-            # Cas spécial : "ID 30" -> on cherche l'ID exact
+        
+        # Prétraitement du contexte pour gérer les listes d'IDs compactes
+        normalized_ctx = context.replace(", ID ", "\nID ").replace(". ID ", "\nID ")
+        ctx_parts = [l.strip() for l in normalized_ctx.split("\n") if l.strip()]
+        
+        for l in ctx_parts:
+            # Cas spécial : "ID 30" -> on cherche l'ID exact dans la partie du texte
             if digits:
                 if any(f"ID {d}" in l for d in digits):
                     relevant.append(l)
@@ -253,7 +258,8 @@ def _context_fallback(prompt: str, context: str) -> str:
                 relevant.append(l)
         
         if relevant:
-            return "D'après vos données SharePoint :\n" + "\n".join(relevant[:5])
+            # On ne retourne que les 2 meilleures correspondances pour plus de clarté
+            return "D'après vos données SharePoint :\n" + "\n".join(relevant[:2])
 
     # 2. Réponses génériques basées sur l'intention (si aucune donnée spécifique trouvée)
     if any(w in p for w in ["formation", "cours", "catalogue"]):
