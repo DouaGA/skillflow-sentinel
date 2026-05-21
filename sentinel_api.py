@@ -39,11 +39,18 @@ logging.basicConfig(level=logging.INFO)
 # ==========================================
 
 SENTINEL_API_KEY = os.getenv("SENTINEL_API_KEY", "").strip()
-HF_SPACE_URL = os.getenv("HF_SPACE_URL", "https://dgalai-skillflow.hf.space").rstrip("/")
-HF_CHAT_PATH = os.getenv("HF_CHAT_PATH", "/api/chat")
 HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
 HF_REQUEST_TIMEOUT = float(os.getenv("HF_REQUEST_TIMEOUT", "60"))
 MAX_REQUESTS_PER_MINUTE = int(os.getenv("MAX_REQUESTS_PER_MINUTE", "5"))
+
+# Modèle HF Inference API (gratuit, aucune clé Groq/Claude requise)
+# Fallback automatique si le premier modèle est surchargé
+HF_MODELS = [
+    "HuggingFaceH4/zephyr-7b-beta",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "microsoft/DialoGPT-medium",
+]
+HF_INFERENCE_URL = "https://router.huggingface.co/hf-inference/models/{model}/v1/chat/completions"
 MAX_PROMPT_LENGTH = int(os.getenv("MAX_PROMPT_LENGTH", "4000"))
 MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "8000"))
 CORS_ORIGINS = [
@@ -206,27 +213,81 @@ def extract_hf_response(data: Any) -> str:
     raise ValueError("Réponse HF sans champ exploitable.")
 
 
+def _build_system_prompt(context: str, role: str) -> str:
+    base = (
+        "Tu es SkillBot, l'assistant RH intelligent de SkillFlow AI 2026. "
+        "Tu aides les employés, managers et équipes RH à gérer les formations, "
+        "parcours de compétences et demandes de formation. "
+        "Réponds toujours en français, de façon concise et professionnelle."
+    )
+    if context:
+        base += f"\n\nContexte disponible (données SharePoint en temps réel):\n{context[:3000]}"
+    return base
+
+
+def _context_fallback(prompt: str, context: str) -> str:
+    """Réponse intelligente basée sur le contexte SharePoint si l'IA est indisponible."""
+    p = prompt.lower()
+    lines = []
+    if context:
+        ctx_lines = [l.strip() for l in context.split("\n") if l.strip()]
+        # Search relevant lines
+        keywords = [w for w in p.split() if len(w) > 3]
+        relevant = [l for l in ctx_lines if any(k in l.lower() for k in keywords)]
+        if relevant:
+            lines.append("D'après vos données SharePoint :")
+            lines.extend(relevant[:5])
+            return "\n".join(lines)
+    # Generic fallback
+    if any(w in p for w in ["formation", "cours", "catalogue"]):
+        return "Consultez le Catalogue de Formations dans votre portail SharePoint pour voir toutes les formations disponibles."
+    if any(w in p for w in ["demande", "inscription", "inscrire"]):
+        return "Pour soumettre une demande de formation, rendez-vous dans le portail Employé > Mes Demandes."
+    if any(w in p for w in ["budget", "coût", "prix"]):
+        return "Les informations budgétaires sont accessibles aux Managers et RH dans le portail de gestion."
+    return (
+        "Je suis SkillBot, votre assistant de formation SkillFlow. "
+        "Posez-moi une question sur les formations, demandes ou votre parcours de compétences."
+    )
+
+
 async def call_hf_llm(request: ChatRequest) -> str:
-    url = f"{HF_SPACE_URL}{HF_CHAT_PATH}"
+    """Appelle l'API Inference HF (gratuite) avec fallback automatique sur plusieurs modèles."""
+    system_prompt = _build_system_prompt(request.context, request.user_role)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": request.prompt},
+    ]
+    payload = {"model": "", "messages": messages, "max_tokens": 512, "temperature": 0.7}
+
     headers = {"Content-Type": "application/json"}
     if HF_TOKEN:
         headers["Authorization"] = f"Bearer {HF_TOKEN}"
 
-    payload = {
-        "prompt": request.prompt,
-        "context": request.context,
-        "user_email": str(request.user_email),
-        "user_role": request.user_role,
-    }
-
+    last_error: Exception | None = None
     async with httpx.AsyncClient(timeout=HF_REQUEST_TIMEOUT) as client:
-        response = await client.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        if not response.content:
-            raise ValueError("Réponse vide du Space Hugging Face.")
-        data = response.json()
+        for model in HF_MODELS:
+            try:
+                url = HF_INFERENCE_URL.format(model=model)
+                payload["model"] = model
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                # OpenAI-compatible format
+                if "choices" in data and data["choices"]:
+                    msg = data["choices"][0].get("message", {})
+                    content = msg.get("content", "").strip()
+                    if content:
+                        logger.info("[Sentinel] Réponse via modèle : %s", model)
+                        return content
+            except Exception as exc:
+                logger.warning("[Sentinel] Modèle %s indisponible : %s", model, exc)
+                last_error = exc
+                continue
 
-    return extract_hf_response(data)
+    # Tous les modèles ont échoué  → fallback contextuel (pas d'erreur 502)
+    logger.warning("[Sentinel] Tous les modèles HF indisponibles, fallback contextuel.")
+    return _context_fallback(request.prompt, request.context)
 
 
 # ==========================================
