@@ -247,10 +247,15 @@ def _context_fallback(prompt: str, context: str) -> str:
         ctx_parts = [l.strip() for l in normalized_ctx.split("\n") if l.strip()]
         
         for l in ctx_parts:
-            # Cas spécial : "ID 30" -> on cherche l'ID exact dans la partie du texte
+            # Cas spécial : "ID 30" -> on cherche l'ID exact suivi de : ou (
             if digits:
-                if any(f"ID {d}" in l for d in digits):
-                    relevant.append(l)
+                found_id = False
+                for d in digits:
+                    if f"ID {d}:" in l or f"ID {d} (" in l:
+                        relevant.append(l)
+                        found_id = True
+                        break
+                if found_id:
                     continue
             
             # Recherche par mots-clés généraux
